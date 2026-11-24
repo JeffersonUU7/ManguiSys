@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Los Manguitos – Sistema integral (mockup)</title>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+--bg:#fbf7ec;--sf:#fff;--ink:#23301f;--mu:#667060;--ln:#e3dcc4;--mg:#f2b21d;--lf:#2f6b3a;--rd:#b3361f;--tag:#e8f1e3}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#161b14;--sf:#1f261c;--ink:#eef1e6;--mu:#a3ad9b;--ln:#344030;--mg:#f2b21d;--lf:#7fc78b;--rd:#ff8a72;--tag:#27351f}}
+*{box-sizing:border-box}html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 "Trebuchet MS",Verdana,sans-serif}
+header{padding:18px 20px 0;max-width:1000px;margin:auto}
+h1{font:700 26px Georgia,serif;margin:0}h1 span{color:var(--lf)}
+header p{margin:2px 0 12px;color:var(--mu)}
+nav{display:flex;gap:4px;flex-wrap:wrap;border-bottom:2px solid var(--ln)}
+nav button{border:0;background:none;color:var(--mu);padding:9px 13px;font:inherit;cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px}
+nav button[aria-selected=true]{color:var(--ink);border-color:var(--mg);font-weight:700}
+main{max-width:1000px;margin:auto;padding:16px 20px 60px}
+.badge{display:inline-block;background:var(--tag);color:var(--lf);border-radius:4px;padding:2px 9px;font-size:13px;margin:0 6px 8px 0}
+.box{background:var(--sf);border:1px solid var(--ln);border-radius:8px;padding:14px;margin-bottom:14px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:end}
+label{display:flex;flex-direction:column;font-size:13px;color:var(--mu);gap:2px}
+input,select{font:inherit;padding:7px;border:1px solid var(--ln);border-radius:5px;background:var(--bg);color:var(--ink);min-width:110px}
+button.go{background:var(--lf);color:#fff;border:0;border-radius:5px;padding:8px 14px;font:inherit;cursor:pointer}
+button.alt{background:none;border:1px solid var(--ln);color:var(--ink);border-radius:5px;padding:7px 12px;cursor:pointer;font:inherit}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--mg)}
+.tbl{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{text-align:left;padding:6px 9px;border-bottom:1px solid var(--ln);white-space:nowrap}th{color:var(--mu);font-weight:600}
+.low{color:var(--rd);font-weight:700}
+#toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom,0px));padding:10px 16px;border-radius:6px;color:#fff;background:var(--lf);display:none;z-index:9;max-width:90%}
+#toast.e{background:var(--rd)}
+ul.tree,ul.tree ul{list-style:none;padding-left:20px;border-left:2px solid var(--ln)}ul.tree{border:0;padding:0}
+.q{display:flex;gap:6px;flex-wrap:wrap}.q span{background:var(--tag);border:1px solid var(--ln);padding:4px 10px;border-radius:5px;font-size:13px}
+.q span:first-child{border-color:var(--mg)}.sm{color:var(--mu);font-size:13px}
+</style>
+</head>
+<body>
+<header>
+<h1>Los <span>Manguitos</span> · Sistema integral</h1>
+<p>Inventario, ventas, pedidos y distribución. Mockup con datos de ejemplo.</p>
+<nav id="nav" role="tablist"></nav>
+</header>
+<main id="v"></main>
+<div id="toast" role="status"></div>
+<script>
+/* ===== DATOS Y ESTRUCTURAS (estado en memoria) ===== */
+const LOCS=["Central","Bodega Norte","Bodega Sur","Suc. Centro","Suc. Oriente","Suc. Costa"];
+const BOD=["Central","Bodega Norte","Bodega Sur"];
+let productos, stock, kardex, pedidos, undoStack, ventas, despachos, clientes, pid;
+// GRAFO ponderado (lista de adyacencia, km)
+const grafo=new Map(LOCS.map(l=>[l,new Map()]));
+[["Central","Bodega Norte",12],["Central","Bodega Sur",18],["Bodega Norte","Suc. Centro",8],["Bodega Sur","Suc. Centro",10],
+["Bodega Sur","Suc. Oriente",15],["Bodega Norte","Suc. Oriente",25],["Suc. Centro","Suc. Costa",20],["Suc. Oriente","Suc. Costa",9]]
+.forEach(([a,b,k])=>{grafo.get(a).set(b,k);grafo.get(b).set(a,k)});
+// ÁRBOL de categorías
+const arbol={n:"Productos",h:[{n:"Frutas",h:[{n:"Tropicales",h:[]},{n:"Cítricos",h:[]}]},{n:"Procesados",h:[{n:"Conservas",h:[]},{n:"Jugos",h:[]}]}]};
+
+function reset(){
+  // DICCIONARIO: sku -> producto (acceso O(1))
+  productos=new Map([["P01",{n:"Mango Tommy 1kg",c:"Tropicales",pv:"Finca El Roble",pr:1.5,min:30}],
+   ["P02",{n:"Piña miel",c:"Tropicales",pv:"Finca El Roble",pr:2.2,min:20}],
+   ["P03",{n:"Limón persa",c:"Cítricos",pv:"Agro Sur",pr:.8,min:25}],
+   ["P04",{n:"Mango en almíbar",c:"Conservas",pv:"Conservas Lempa",pr:3.4,min:15}],
+   ["P05",{n:"Jugo de mango 1L",c:"Jugos",pv:"Conservas Lempa",pr:2.9,min:20}]]);
+  // DICCIONARIO anidado: sku -> {ubicación: cantidad}
+  stock=new Map([["P01",{Central:120,"Bodega Norte":60,"Bodega Sur":40,"Suc. Centro":20,"Suc. Oriente":15,"Suc. Costa":10}],
+   ["P02",{Central:80,"Bodega Norte":30,"Bodega Sur":25,"Suc. Centro":10,"Suc. Oriente":8,"Suc. Costa":5}],
+   ["P03",{Central:50,"Bodega Norte":40,"Bodega Sur":35,"Suc. Centro":12,"Suc. Oriente":10,"Suc. Costa":6}],
+   ["P04",{Central:40,"Bodega Norte":20,"Bodega Sur":18,"Suc. Centro":5,"Suc. Oriente":4,"Suc. Costa":3}],
+   ["P05",{Central:60,"Bodega Norte":25,"Bodega Sur":20,"Suc. Centro":9,"Suc. Oriente":7,"Suc. Costa":4}]]);
+  clientes=new Map([["C01","Supermercado La Unión"],["C02","Tienda Doña Rosa"],["C03","Hotel Costa Azul"]]);
+  kardex=[];ventas=[];despachos=[];pedidos=[];undoStack=[];pid=1; // LISTAS, COLA y PILA
+}
+reset();
+
+/* ===== LÓGICA ===== */
+const R=(ok,msg)=>({ok,msg});
+const total=s=>Object.values(stock.get(s)).reduce((a,b)=>a+b,0);
+function log(tipo,sku,loc,qty,nota=""){kardex.push({t:new Date().toLocaleTimeString(),tipo,sku,loc,qty,nota})}
+function chk(sku,loc,qty){
+  if(!sku||!productos.has(sku))return R(0,"El producto no existe.");
+  if(loc&&!LOCS.includes(loc))return R(0,"Ubicación inválida.");
+  if(!Number.isInteger(qty)||qty<=0)return R(0,"La cantidad debe ser un entero mayor que 0.");
+  return null;
+}
+function mover(sku,loc,qty,tipo){ // entrada/salida
+  const e=chk(sku,loc,qty);if(e)return e;
+  const s=stock.get(sku);
+  if(tipo==="Salida"&&s[loc]<qty)return R(0,`Stock insuficiente en ${loc} (hay ${s[loc]}).`);
+  const d=tipo==="Entrada"?qty:-qty;s[loc]+=d;log(tipo,sku,loc,qty);
+  undoStack.push({d:`${tipo} ${qty} ${sku} en ${loc}`,f:()=>{s[loc]-=d;log("Reversión",sku,loc,qty,tipo)}});
+  return R(1,`${tipo} registrada: ${qty} × ${productos.get(sku).n}.`);
+}
+function transferir(sku,a,b,qty){
+  const e=chk(sku,a,qty)||chk(sku,b,qty);if(e)return e;
+  if(a===b)return R(0,"Origen y destino son iguales.");
+  const s=stock.get(sku);if(s[a]<qty)return R(0,`Stock insuficiente en ${a} (hay ${s[a]}).`);
+  s[a]-=qty;s[b]+=qty;log("Transferencia",sku,a+" → "+b,qty);
+  undoStack.push({d:`Transferencia ${qty} ${sku} ${a}→${b}`,f:()=>{s[a]+=qty;s[b]-=qty;log("Reversión",sku,b+" → "+a,qty)}});
+  return R(1,"Transferencia realizada.");
+}
+function vender(cli,sku,loc,qty){
+  if(!clientes.has(cli))return R(0,"Selecciona un cliente registrado.");
+  const e=chk(sku,loc,qty);if(e)return e;
+  const s=stock.get(sku);if(s[loc]<qty)return R(0,`Stock insuficiente en ${loc} (hay ${s[loc]}).`);
+  s[loc]-=qty;const m=+(qty*productos.get(sku).pr).toFixed(2);ventas.push({cli,sku,loc,qty,m});log("Venta",sku,loc,qty,clientes.get(cli));
+  undoStack.push({d:`Venta ${qty} ${sku} a ${cli}`,f:()=>{s[loc]+=qty;ventas.pop();log("Reversión",sku,loc,qty,"Venta")}});
+  return R(1,`Venta registrada: $${m.toFixed(2)}.`);
+}
+function deshacer(){ // PILA: LIFO
+  if(!undoStack.length)return R(0,"No hay operaciones para deshacer (pila vacía).");
+  const o=undoStack.pop();o.f();return R(1,"Deshecho: "+o.d);
+}
+function crearPedido(cli,sku,qty,dest){ // COLA: enqueue
+  if(!clientes.has(cli))return R(0,"Selecciona un cliente registrado.");
+  const e=chk(sku,dest,qty);if(e)return e;
+  pedidos.push({id:pid++,cli,sku,qty,dest,est:"Pendiente"});return R(1,`Pedido #${pid-1} en cola.`);
+}
+function atender(){ // COLA: dequeue (FIFO)
+  if(!pedidos.length)return R(0,"No hay pedidos pendientes (cola vacía).");
+  const p=pedidos[0],s=stock.get(p.sku);
+  const org=BOD.find(b=>s[b]>=p.qty);
+  if(!org)return R(0,`Pedido #${p.id}: ninguna bodega tiene ${p.qty} unidades. Reabastece.`);
+  pedidos.shift();const r=dijkstra(org,p.dest);
+  if(org!==p.dest){s[org]-=p.qty;s[p.dest]+=p.qty}
+  despachos.push({id:p.id,org,dest:p.dest,ruta:r.ruta.join(" → "),km:r.km});log("Despacho",p.sku,org+" → "+p.dest,p.qty,"Pedido #"+p.id);
+  return R(1,`Pedido #${p.id} despachado desde ${org} (${r.km} km).`);
+}
+function dijkstra(a,b){ // ruta más corta
+  const d=new Map(LOCS.map(l=>[l,Infinity])),prev={},q=new Set(LOCS);d.set(a,0);
+  while(q.size){let u=null;q.forEach(x=>{if(u===null||d.get(x)<d.get(u))u=x});q.delete(u);
+    grafo.get(u).forEach((w,v)=>{if(d.get(u)+w<d.get(v)){d.set(v,d.get(u)+w);prev[v]=u}})}
+  const ruta=[b];while(ruta[0]!==a)ruta.unshift(prev[ruta[0]]);return{ruta,km:d.get(b)};
+}
+function todasRutas(a,b,vis=[a],km=0,out=[]){ // RECURSIVIDAD (DFS con retroceso)
+  if(a===b){out.push({ruta:[...vis],km});return out}
+  grafo.get(a).forEach((w,v)=>{if(!vis.includes(v)){vis.push(v);todasRutas(v,b,vis,km+w,out);vis.pop()}});
+  return out;
+}
+function contar(nodo,sku){ // RECURSIVIDAD sobre el árbol: existencias por rama
+  let t=productos.get(sku)&&productos.get(sku).c===nodo.n?total(sku):0;
+  return t+nodo.h.reduce((a,h)=>a+contar(h,sku),0);
+}
+const stockRama=nodo=>[...productos.keys()].reduce((a,s)=>a+contar(nodo,s),0);
+
+/* ===== INTERFAZ ===== */
+const $=id=>document.getElementById(id);
+const opt=(arr,f=x=>x,g=x=>x)=>arr.map(x=>`<option value="${f(x)}">${g(x)}</option>`).join("");
+const sk=()=>opt([...productos.keys()],x=>x,x=>x+" · "+productos.get(x).n);
+const cl=()=>opt([...clientes.keys()],x=>x,x=>clientes.get(x));
+const lo=()=>opt(LOCS);
+let tab="Inventario",tt;
+function toast(r){const t=$("toast");t.textContent=r.msg;t.className=r.ok?"":"e";t.style.display="block";clearTimeout(tt);tt=setTimeout(()=>t.style.display="none",3200)}
+function act(fn,...ids){const r=fn(...ids.map(i=>{const e=$(i);return e.type==="number"?(e.value===""?NaN:Number(e.value)):e.value}));toast(r);draw()}
+const TABS={
+Inventario:()=>`<span class="badge">Diccionario (Map)</span><span class="badge">Lista</span>
+<div class="box"><b>Registrar producto</b><div class="row">
+<label>Código<input id="n1" placeholder="P06"></label><label>Nombre<input id="n2"></label>
+<label>Categoría<select id="n3">${opt(["Tropicales","Cítricos","Conservas","Jugos"])}</select></label>
+<label>Proveedor<input id="n4"></label><label>Precio<input id="n5" type="number" step=".01"></label>
+<button class="go" onclick="nuevoProd()">Registrar</button></div></div>
+<div class="box"><b>Entrada / salida de inventario</b><div class="row">
+<label>Producto<select id="m1">${sk()}</select></label><label>Ubicación<select id="m2">${lo()}</select></label>
+<label>Cantidad<input id="m3" type="number"></label>
+<button class="go" onclick="act((a,b,c)=>mover(a,b,c,'Entrada'),'m1','m2','m3')">Entrada</button>
+<button class="alt" onclick="act((a,b,c)=>mover(a,b,c,'Salida'),'m1','m2','m3')">Salida</button></div></div>
+<div class="box tbl"><table><tr><th>Código</th><th>Producto</th><th>Categoría</th><th>Proveedor</th>${LOCS.map(l=>`<th>${l}</th>`).join("")}<th>Total</th></tr>
+${[...productos].map(([k,p])=>`<tr><td>${k}</td><td>${p.n}</td><td>${p.c}</td><td>${p.pv}</td>${LOCS.map(l=>`<td class="${stock.get(k)[l]<p.min/3?"low":""}">${stock.get(k)[l]}</td>`).join("")}<td><b>${total(k)}</b></td></tr>`).join("")}</table>
+<p class="sm">En rojo: existencias bajas en esa ubicación.</p></div>
+<div class="box"><b>Buscar por código (acceso directo)</b><div class="row"><label>Código<input id="bq" placeholder="P01"></label><button class="alt" onclick="const p=productos.get($('bq').value.trim().toUpperCase());toast(p?R(1,p.n+' · $'+p.pr+' · total '+total($('bq').value.trim().toUpperCase())):R(0,'Producto no encontrado.'))">Buscar</button></div></div>`,
+Ventas:()=>`<span class="badge">Diccionario (clientes)</span><span class="badge">Lista (ventas)</span><span class="badge">Pila (deshacer)</span>
+<div class="box"><b>Nueva venta</b><div class="row"><label>Cliente<select id="v1">${cl()}</select></label><label>Producto<select id="v2">${sk()}</select></label>
+<label>Sucursal<select id="v3">${opt(LOCS.slice(3))}</select></label><label>Cantidad<input id="v4" type="number"></label>
+<button class="go" onclick="act(vender,'v1','v2','v3','v4')">Vender</button>
+<button class="alt" onclick="toast(deshacer());draw()">Deshacer última operación (${undoStack.length})</button></div></div>
+<div class="box tbl"><table><tr><th>Cliente</th><th>Producto</th><th>Sucursal</th><th>Cant.</th><th>Monto</th></tr>
+${ventas.length?ventas.map(v=>`<tr><td>${clientes.get(v.cli)}</td><td>${v.sku}</td><td>${v.loc}</td><td>${v.qty}</td><td>$${v.m.toFixed(2)}</td></tr>`).join(""):`<tr><td colspan=5 class="sm">Aún no hay ventas. Registra la primera arriba.</td></tr>`}</table></div>`,
+Pedidos:()=>`<span class="badge">Cola FIFO</span><span class="badge">Grafo + Dijkstra al despachar</span>
+<div class="box"><b>Crear pedido</b><div class="row"><label>Cliente<select id="p1">${cl()}</select></label><label>Producto<select id="p2">${sk()}</select></label>
+<label>Destino<select id="p3">${opt(LOCS.slice(3))}</select></label><label>Cantidad<input id="p4" type="number"></label>
+<button class="go" onclick="act(crearPedido,'p1','p2','p4','p3')">Encolar</button>
+<button class="alt" onclick="toast(atender());draw()">Atender siguiente</button></div></div>
+<div class="box"><b>Cola de pedidos (el primero sale primero)</b><div class="q" style="margin-top:8px">
+${pedidos.length?pedidos.map(p=>`<span>#${p.id} · ${p.qty}× ${p.sku} → ${p.dest}</span>`).join(""):'<span class="sm">Cola vacía</span>'}</div></div>
+<div class="box tbl"><b>Despachos realizados</b><table><tr><th>Pedido</th><th>Origen</th><th>Ruta</th><th>km</th></tr>
+${despachos.map(d=>`<tr><td>#${d.id}</td><td>${d.org}</td><td>${d.ruta}</td><td>${d.km}</td></tr>`).join("")||'<tr><td colspan=4 class="sm">Sin despachos todavía.</td></tr>'}</table></div>`,
+Distribución:()=>`<span class="badge">Grafo ponderado</span><span class="badge">Recursividad (rutas)</span><span class="badge">Dijkstra</span>
+<div class="box"><b>Consultar rutas</b><div class="row"><label>Origen<select id="r1">${lo()}</select></label><label>Destino<select id="r2">${opt(LOCS,x=>x,x=>x)}</select></label>
+<button class="go" onclick="rutas()">Ver rutas</button></div><div id="rs" style="margin-top:10px"></div></div>
+<div class="box"><b>Red de distribución (km)</b><table>${[...grafo].map(([a,m])=>`<tr><td><b>${a}</b></td><td>${[...m].map(([b,k])=>b+" ("+k+")").join(", ")}</td></tr>`).join("")}</table></div>
+<div class="box"><b>Transferir entre ubicaciones</b><div class="row"><label>Producto<select id="t1">${sk()}</select></label><label>Desde<select id="t2">${lo()}</select></label>
+<label>Hacia<select id="t3">${lo()}</select></label><label>Cantidad<input id="t4" type="number"></label><button class="go" onclick="act(transferir,'t1','t2','t3','t4')">Transferir</button></div></div>`,
+Categorías:()=>{const n=(x)=>`<li>${x.n} <span class="sm">(${stockRama(x)} unidades)</span>${x.h.length?`<ul class="tree">${x.h.map(n).join("")}</ul>`:""}</li>`;
+return`<span class="badge">Árbol</span><span class="badge">Recursividad</span><div class="box"><p class="sm">Cada rama suma recursivamente las existencias de sus hijos.</p><ul class="tree">${n(arbol)}</ul></div>`},
+Historial:()=>`<span class="badge">Lista (kardex, solo se agrega)</span><div class="box tbl"><table><tr><th>Hora</th><th>Tipo</th><th>Producto</th><th>Ubicación</th><th>Cant.</th><th>Nota</th></tr>
+${kardex.length?[...kardex].reverse().map(k=>`<tr><td>${k.t}</td><td>${k.tipo}</td><td>${k.sku}</td><td>${k.loc}</td><td>${k.qty}</td><td>${k.nota}</td></tr>`).join(""):'<tr><td colspan=6 class="sm">Sin movimientos. Registra una entrada, venta o transferencia.</td></tr>'}</table></div>`,
+Pruebas:()=>`<span class="badge">Validaciones</span><div class="box"><p>Ejecuta casos límite: entradas inválidas y estructuras vacías.</p>
+<button class="go" onclick="pruebas()">Ejecutar pruebas</button> <button class="alt" onclick="reset();toast(R(1,'Datos de ejemplo restaurados.'));draw()">Restaurar datos</button><div class="tbl"><table id="pt"></table></div></div>`
+};
+function draw(){
+  $("nav").innerHTML=Object.keys(TABS).map(t=>`<button role="tab" aria-selected="${t===tab}" onclick="tab='${t}';draw()">${t}</button>`).join("");
+  $("v").innerHTML=TABS[tab]();
+}
+function nuevoProd(){
+  const k=$("n1").value.trim().toUpperCase(),n=$("n2").value.trim(),pr=parseFloat($("n5").value);
+  if(!k||!n)return toast(R(0,"Código y nombre son obligatorios."));
+  if(productos.has(k))return toast(R(0,"Ese código ya existe."));
+  if(!(pr>0))return toast(R(0,"El precio debe ser mayor que 0."));
+  productos.set(k,{n,c:$("n3").value,pv:$("n4").value.trim()||"Sin proveedor",pr,min:20});
+  stock.set(k,Object.fromEntries(LOCS.map(l=>[l,0])));toast(R(1,"Producto registrado."));draw();
+}
+function rutas(){
+  const a=$("r1").value,b=$("r2").value;if(a===b)return toast(R(0,"Elige origen y destino distintos."));
+  const best=dijkstra(a,b),all=todasRutas(a,b).sort((x,y)=>x.km-y.km);
+  $("rs").innerHTML=`<p><b>Más corta:</b> ${best.ruta.join(" → ")} (${best.km} km)</p><p class="sm">${all.length} rutas posibles:</p><ul>${all.map(r=>`<li>${r.ruta.join(" → ")} · ${r.km} km</li>`).join("")}</ul>`;
+}
+function pruebas(){
+  const casos=[["Venta con cantidad 0",()=>vender("C01","P01","Suc. Centro",0)],["Venta de producto inexistente",()=>vender("C01","P99","Suc. Centro",1)],
+  ["Salida mayor al stock",()=>mover("P01","Suc. Costa",9999,"Salida")],["Cantidad decimal",()=>mover("P01","Central",2.5,"Entrada")],
+  ["Transferencia mismo origen/destino",()=>transferir("P01","Central","Central",1)],["Cliente no registrado",()=>crearPedido("C99","P01",1,"Suc. Costa")]];
+  const vacio=[];if(!pedidos.length)vacio.push(["Atender con cola vacía",atender]);if(!undoStack.length)vacio.push(["Deshacer con pila vacía",deshacer]);
+  $("pt").innerHTML="<tr><th>Caso</th><th>Resultado</th><th>Estado</th></tr>"+[...casos,...vacio].map(([n,f])=>{const r=f();return`<tr><td>${n}</td><td>${r.msg}</td><td>${r.ok?"Falla: aceptó un dato inválido":"Rechazado correctamente"}</td></tr>`}).join("");
+}
+draw();
+</script>
+</body>
+</html>
